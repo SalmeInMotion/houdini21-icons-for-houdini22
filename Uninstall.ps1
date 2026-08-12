@@ -1,7 +1,7 @@
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Low')]
 param(
     [string]$Houdini22 = 'C:\Program Files\Side Effects Software\Houdini 22.0.368',
-    [string]$DataRoot = (Join-Path $env:LOCALAPPDATA 'Houdini21IconsFor22'),
+    [string]$DataRoot,
     [string]$PackageDirectory,
     [switch]$KeepGeneratedData
 )
@@ -10,12 +10,20 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'HoudiniIcons.Common.ps1')
 
 $target = Assert-HoudiniInstall -InstallRoot $Houdini22 -ExpectedMajor 22
+if ([string]::IsNullOrWhiteSpace($DataRoot)) {
+    $DataRoot = Get-ExistingDataRoot -TargetVersion $target.Version
+}
 $DataRoot = Get-NormalizedFullPath -Path $DataRoot
 if ([string]::IsNullOrWhiteSpace($PackageDirectory)) {
     $PackageDirectory = Get-DefaultPackageDirectory -HConfig $target.HConfig
 }
 $PackageDirectory = Get-NormalizedFullPath -Path $PackageDirectory
-$packagePath = Join-Path $PackageDirectory $script:PackageFileName
+$packagePath = Join-Path $PackageDirectory (Get-HoudiniIconModPackageFileName -TargetVersion $target.Version)
+$legacyPackagePath = Join-Path $PackageDirectory $script:LegacyPackageFileName
+if (-not (Test-Path -LiteralPath $packagePath -PathType Leaf) -and
+    (Test-OwnedPackageFile -Path $legacyPackagePath)) {
+    $packagePath = $legacyPackagePath
+}
 
 $removedAnything = $false
 $foundAnything = $false

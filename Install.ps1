@@ -2,7 +2,7 @@
 param(
     [string]$Houdini21 = 'C:\Program Files\Side Effects Software\Houdini 21.0.700',
     [string]$Houdini22 = 'C:\Program Files\Side Effects Software\Houdini 22.0.368',
-    [string]$DataRoot = (Join-Path $env:LOCALAPPDATA 'Houdini21IconsFor22'),
+    [string]$DataRoot,
     [string]$PackageDirectory,
     [switch]$Force
 )
@@ -13,13 +13,21 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 $source = Assert-HoudiniInstall -InstallRoot $Houdini21 -ExpectedMajor 21
 $target = Assert-HoudiniInstall -InstallRoot $Houdini22 -ExpectedMajor 22
+$usingDefaultDataRoot = [string]::IsNullOrWhiteSpace($DataRoot)
+if ($usingDefaultDataRoot) {
+    $DataRoot = Get-DefaultDataRoot -TargetVersion $target.Version
+}
 $DataRoot = Get-NormalizedFullPath -Path $DataRoot
+$legacyDataRoot = Get-HoudiniIconModBaseRoot
+$legacyManifest = if ($usingDefaultDataRoot) { Get-OwnedManifest -DataRoot $legacyDataRoot } else { $null }
 
 if ([string]::IsNullOrWhiteSpace($PackageDirectory)) {
     $PackageDirectory = Get-DefaultPackageDirectory -HConfig $target.HConfig
 }
 $PackageDirectory = Get-NormalizedFullPath -Path $PackageDirectory
-$packagePath = Join-Path $PackageDirectory $script:PackageFileName
+$packageFileName = Get-HoudiniIconModPackageFileName -TargetVersion $target.Version
+$packagePath = Join-Path $PackageDirectory $packageFileName
+$legacyPackagePath = Join-Path $PackageDirectory $script:LegacyPackageFileName
 
 if ((Test-Path -LiteralPath $packagePath -PathType Leaf) -and -not (Test-OwnedPackageFile -Path $packagePath) -and -not $Force) {
     throw "A package not owned by this mod already exists at $packagePath. Use -Force only after reviewing it."
@@ -120,7 +128,7 @@ try {
 
         $manifest = [ordered]@{
             modId = $script:ModId
-            schemaVersion = 2
+            schemaVersion = 3
             installedAtUtc = [DateTime]::UtcNow.ToString('o')
             replacementStamp = $replacementStamp
             source = [ordered]@{
@@ -153,7 +161,7 @@ try {
         $finalOverlayRoot = Join-Path $DataRoot 'houdini'
         $finalCacheRoot = Join-Path $DataRoot 'cache'
         $package = [ordered]@{
-            enable = "houdini_version == '22.0'"
+            enable = "houdini_version == '$($target.Version)'"
             show = $true
             env = @(
                 [ordered]@{ HOUDINI21_ICONS_FOR_22 = $script:ModId },
@@ -189,6 +197,30 @@ try {
         if (Test-Path -LiteralPath $backup -PathType Container) {
             $null = Assert-SafeGeneratedDataRoot -DataRoot $backup
             Remove-Item -LiteralPath $backup -Recurse -Force
+        }
+
+        if ($usingDefaultDataRoot -and $legacyPackagePath -ne $packagePath -and
+            (Test-OwnedPackageFile -Path $legacyPackagePath)) {
+            Remove-Item -LiteralPath $legacyPackagePath -Force
+            Write-Host "Removed the legacy unversioned package file."
+        }
+
+        if ($usingDefaultDataRoot -and $null -ne $legacyManifest -and
+            (Get-NormalizedFullPath -Path $legacyDataRoot) -ne $DataRoot) {
+            # v1.0.0 stored its generated files directly in the base folder.
+            # Remove only those known owned artifacts after the versioned
+            # replacement and package have both been installed successfully.
+            foreach ($legacyDirectoryName in @('houdini', 'cache')) {
+                $legacyDirectory = Join-Path $legacyDataRoot $legacyDirectoryName
+                if (Test-Path -LiteralPath $legacyDirectory -PathType Container) {
+                    Remove-Item -LiteralPath $legacyDirectory -Recurse -Force
+                }
+            }
+            $legacyManifestPath = Join-Path $legacyDataRoot 'manifest.json'
+            if (Test-Path -LiteralPath $legacyManifestPath -PathType Leaf) {
+                Remove-Item -LiteralPath $legacyManifestPath -Force
+            }
+            Write-Host "Migrated the v1.0.0 overlay to build-specific storage."
         }
 
         Write-Host "Installed package: $packagePath"

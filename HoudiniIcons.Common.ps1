@@ -1,7 +1,14 @@
 Set-StrictMode -Version Latest
 
 $script:ModId = "houdini21-icons-for-22"
-$script:PackageFileName = "houdini21_icons_for_houdini22.json"
+$script:LegacyPackageFileName = "houdini21_icons_for_houdini22.json"
+
+function Get-HoudiniIconModPackageFileName {
+    param([Parameter(Mandatory = $true)][string]$TargetVersion)
+
+    $safeVersion = $TargetVersion -replace '[^0-9A-Za-z._-]', '_'
+    return "houdini21_icons_for_houdini22_$safeVersion.json"
+}
 
 function Get-NormalizedFullPath {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -13,6 +20,24 @@ function ConvertTo-HoudiniPath {
     param([Parameter(Mandatory = $true)][string]$Path)
 
     return (Get-NormalizedFullPath -Path $Path).Replace('\', '/')
+}
+
+function Resolve-HoudiniInstallRoot {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $resolved = Get-NormalizedFullPath -Path $Path
+    if (Test-Path -LiteralPath $resolved -PathType Leaf) {
+        if ([System.IO.Path]::GetFileName($resolved) -notmatch '^houdini(fx|core|indie|apprentice)?\.exe$') {
+            return $resolved
+        }
+        $resolved = Split-Path -Parent (Split-Path -Parent $resolved)
+    }
+    elseif ((Split-Path -Leaf $resolved) -ieq 'bin' -and
+            (Test-Path -LiteralPath (Join-Path $resolved 'houdinifx.exe') -PathType Leaf)) {
+        $resolved = Split-Path -Parent $resolved
+    }
+
+    return (Get-NormalizedFullPath -Path $resolved)
 }
 
 function Get-HoudiniExecutableVersion {
@@ -33,7 +58,7 @@ function Assert-HoudiniInstall {
         [Parameter(Mandatory = $true)][int]$ExpectedMajor
     )
 
-    $resolved = Get-NormalizedFullPath -Path $InstallRoot
+    $resolved = Resolve-HoudiniInstallRoot -Path $InstallRoot
     if (-not (Test-Path -LiteralPath $resolved -PathType Container)) {
         throw "Houdini $ExpectedMajor installation directory does not exist: $resolved"
     }
@@ -54,6 +79,66 @@ function Assert-HoudiniInstall {
         IconsZip = $iconsZip
         HConfig = Join-Path $resolved "bin\hconfig.exe"
     }
+}
+
+function Get-HoudiniInstallCandidates {
+    param([Parameter(Mandatory = $true)][int]$ExpectedMajor)
+
+    $candidatePaths = New-Object System.Collections.Generic.List[string]
+    $searchRoots = @()
+    if (-not [string]::IsNullOrWhiteSpace($env:ProgramFiles)) {
+        $searchRoots += (Join-Path $env:ProgramFiles 'Side Effects Software')
+    }
+    $programFilesX86 = [Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
+    if (-not [string]::IsNullOrWhiteSpace($programFilesX86)) {
+        $searchRoots += (Join-Path $programFilesX86 'Side Effects Software')
+    }
+
+    foreach ($searchRoot in ($searchRoots | Select-Object -Unique)) {
+        if (-not (Test-Path -LiteralPath $searchRoot -PathType Container)) { continue }
+        foreach ($directory in @(Get-ChildItem -LiteralPath $searchRoot -Directory -ErrorAction SilentlyContinue)) {
+            if ($directory.Name -match ("^Houdini\s+{0}\." -f $ExpectedMajor)) {
+                $candidatePaths.Add($directory.FullName)
+            }
+        }
+    }
+
+    $uninstallRoots = @(
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall',
+        'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
+    )
+    foreach ($uninstallRoot in $uninstallRoots) {
+        if (-not (Test-Path -LiteralPath $uninstallRoot)) { continue }
+        foreach ($key in @(Get-ChildItem -LiteralPath $uninstallRoot -ErrorAction SilentlyContinue)) {
+            try {
+                $entry = Get-ItemProperty -LiteralPath $key.PSPath -ErrorAction Stop
+                if ([string]$entry.DisplayName -match ("^Houdini\s+{0}\." -f $ExpectedMajor) -and
+                    -not [string]::IsNullOrWhiteSpace([string]$entry.InstallLocation)) {
+                    $candidatePaths.Add([string]$entry.InstallLocation)
+                }
+            }
+            catch {
+                continue
+            }
+        }
+    }
+
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    $installs = New-Object System.Collections.Generic.List[object]
+    foreach ($path in $candidatePaths) {
+        try {
+            $install = Assert-HoudiniInstall -InstallRoot $path -ExpectedMajor $ExpectedMajor
+            if ($seen.Add([string]$install.Root)) {
+                $installs.Add($install)
+            }
+        }
+        catch {
+            continue
+        }
+    }
+
+    return @($installs | Sort-Object -Property @{ Expression = { [version]$_.Version }; Descending = $true })
 }
 
 function Get-HoudiniConfigValue {
@@ -83,6 +168,60 @@ function Get-DefaultPackageDirectory {
 
     $userPrefDir = Get-HoudiniConfigValue -HConfig $HConfig -Name "HOUDINI_USER_PREF_DIR"
     return (Join-Path $userPrefDir "packages")
+}
+
+function Get-HoudiniIconModBaseRoot {
+    return (Join-Path $env:LOCALAPPDATA 'Houdini21IconsFor22')
+}
+
+function Get-DefaultDataRoot {
+    param([Parameter(Mandatory = $true)][string]$TargetVersion)
+
+    $safeVersion = $TargetVersion -replace '[^0-9A-Za-z._-]', '_'
+    return (Join-Path (Join-Path (Get-HoudiniIconModBaseRoot) 'overlays') $safeVersion)
+}
+
+function Get-ExistingDataRoot {
+    param([Parameter(Mandatory = $true)][string]$TargetVersion)
+
+    $versioned = Get-DefaultDataRoot -TargetVersion $TargetVersion
+    if ($null -ne (Get-OwnedManifest -DataRoot $versioned)) {
+        return $versioned
+    }
+
+    # Compatibility with v1.0.0, which stored one unversioned overlay.
+    $legacy = Get-HoudiniIconModBaseRoot
+    $legacyManifest = Get-OwnedManifest -DataRoot $legacy
+    if ($null -ne $legacyManifest -and [string]$legacyManifest.target.version -eq $TargetVersion) {
+        return $legacy
+    }
+
+    return $versioned
+}
+
+function Get-HoudiniIconModInstalledOverlays {
+    $baseRoot = Get-HoudiniIconModBaseRoot
+    $dataRoots = New-Object System.Collections.Generic.List[string]
+    $dataRoots.Add($baseRoot)
+
+    $overlaysRoot = Join-Path $baseRoot 'overlays'
+    if (Test-Path -LiteralPath $overlaysRoot -PathType Container) {
+        foreach ($directory in @(Get-ChildItem -LiteralPath $overlaysRoot -Directory -ErrorAction SilentlyContinue)) {
+            $dataRoots.Add($directory.FullName)
+        }
+    }
+
+    $installed = New-Object System.Collections.Generic.List[object]
+    foreach ($dataRoot in $dataRoots) {
+        $manifest = Get-OwnedManifest -DataRoot $dataRoot
+        if ($null -ne $manifest) {
+            $installed.Add([pscustomobject]@{
+                DataRoot = (Get-NormalizedFullPath -Path $dataRoot)
+                Manifest = $manifest
+            })
+        }
+    }
+    return @($installed | ForEach-Object { $_ })
 }
 
 function Get-StreamSha256 {
