@@ -35,7 +35,7 @@ The graphical setup detects other 21.x/22.x installations automatically. The com
 
 1. Download or clone this repository.
 2. Close every Houdini window.
-3. Double-click `Setup.cmd` (or `Install.cmd`).
+3. Double-click `Setup.cmd`.
 4. Check the automatically selected H21 and H22 folders, or choose them manually.
 5. Click **Install / Update** and then start Houdini 22.
 
@@ -88,7 +88,7 @@ Preview the operation without writing anything:
 
 ## Verify the installation
 
-Click **Verify** in `Setup.cmd`, double-click `Status.cmd`, or run:
+Click **Verify** in `Setup.cmd`, or run:
 
 ```powershell
 .\Status.ps1 -VerifyFiles
@@ -98,7 +98,7 @@ The integrity check verifies the source and target archives, both generated icon
 
 ## Uninstall
 
-Close Houdini, open `Setup.cmd`, select the relevant H22 build, and click **Uninstall**. `Uninstall.cmd` opens the same setup window. Advanced users can run:
+Close Houdini, open `Setup.cmd`, select the relevant H22 build, and click **Uninstall**. Advanced users can run:
 
 ```powershell
 .\Uninstall.ps1
