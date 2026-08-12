@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$Houdini22 = 'C:\Program Files\Side Effects Software\Houdini 22.0.368',
-    [string]$DataRoot = (Join-Path $env:LOCALAPPDATA 'Houdini21IconsFor22'),
+    [string]$DataRoot,
     [string]$PackageDirectory,
     [switch]$VerifyFiles
 )
@@ -10,17 +10,37 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'HoudiniIcons.Common.ps1')
 
 $target = Assert-HoudiniInstall -InstallRoot $Houdini22 -ExpectedMajor 22
+if ([string]::IsNullOrWhiteSpace($DataRoot)) {
+    $DataRoot = Get-ExistingDataRoot -TargetVersion $target.Version
+}
 $DataRoot = Get-NormalizedFullPath -Path $DataRoot
 if ([string]::IsNullOrWhiteSpace($PackageDirectory)) {
     $PackageDirectory = Get-DefaultPackageDirectory -HConfig $target.HConfig
 }
 $PackageDirectory = Get-NormalizedFullPath -Path $PackageDirectory
-$packagePath = Join-Path $PackageDirectory $script:PackageFileName
+$packagePath = Join-Path $PackageDirectory (Get-HoudiniIconModPackageFileName -TargetVersion $target.Version)
+$legacyPackagePath = Join-Path $PackageDirectory $script:LegacyPackageFileName
+if (-not (Test-Path -LiteralPath $packagePath -PathType Leaf) -and
+    (Test-OwnedPackageFile -Path $legacyPackagePath)) {
+    $packagePath = $legacyPackagePath
+}
 $manifest = Get-OwnedManifest -DataRoot $DataRoot
 $packageOwned = Test-OwnedPackageFile -Path $packagePath
+$packageMatchesBuild = $false
+if ($packageOwned) {
+    try {
+        $packageData = Get-Content -LiteralPath $packagePath -Raw | ConvertFrom-Json
+        $packageMatchesBuild = [string]$packageData.enable -eq "houdini_version == '$($target.Version)'"
+    }
+    catch {
+        $packageMatchesBuild = $false
+    }
+}
+$manifestMatchesBuild = $null -ne $manifest -and [string]$manifest.target.version -eq $target.Version
 
 Write-Host ("Package installed: {0}" -f $packageOwned)
 Write-Host "Package path: $packagePath"
+Write-Host ("Package restricted to selected build: {0}" -f $packageMatchesBuild)
 Write-Host ("Generated overlay present: {0}" -f ($null -ne $manifest))
 Write-Host "Data path: $DataRoot"
 
@@ -35,6 +55,13 @@ if ($null -ne $manifest) {
 
     if ($VerifyFiles) {
         $bad = New-Object System.Collections.Generic.List[string]
+
+        if (-not $packageMatchesBuild) {
+            $bad.Add("package is not restricted to Houdini $($target.Version); rebuild with Install.ps1")
+        }
+        if (-not $manifestMatchesBuild) {
+            $bad.Add("generated overlay does not target Houdini $($target.Version); rebuild with Install.ps1")
+        }
 
         $currentTargetArchiveHash = (Get-FileHash -LiteralPath $target.IconsZip -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($currentTargetArchiveHash -ne [string]$manifest.target.archiveSha256) {
@@ -70,7 +97,7 @@ if ($null -ne $manifest) {
     }
 }
 
-if ($packageOwned -and $null -ne $manifest) {
+if ($packageOwned -and $null -ne $manifest -and $packageMatchesBuild -and $manifestMatchesBuild) {
     Write-Host 'Status: ENABLED (restart Houdini if it was already open).'
 }
 elseif (-not $packageOwned -and $null -eq $manifest) {
