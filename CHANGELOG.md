@@ -10,6 +10,7 @@
 - Added automatic migration from the unversioned v1.0.0 overlay.
 - Removed the redundant legacy `Install.cmd`, `Status.cmd`, and `Uninstall.cmd` launchers; `Setup.cmd` is now the single end-user entry point.
 - Fixed **Browse** failing with a .NET JIT error when no Houdini installation was detected and the path field was empty.
+- Documented and tested installation from a `Restricted` PowerShell parent without changing the user's permanent execution policy.
 - Verified Houdini 21.0.631 and 21.0.700 as sources for Houdini 22.0.368.
 
 ## 1.0.0 - 2026-08-12

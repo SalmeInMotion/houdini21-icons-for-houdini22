@@ -1,5 +1,8 @@
 .test/
 .tmp-*/
+/_archive/
+/dist/
+/social/
 *.staging.*
 *.backup.*
 manifest.json

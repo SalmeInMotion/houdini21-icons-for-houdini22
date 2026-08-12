@@ -41,6 +41,12 @@ The graphical setup detects other 21.x/22.x installations automatically. The com
 
 The setup window follows the Windows display language for English and Spanish. The same window can verify or uninstall the mod. No administrator privileges are required.
 
+## PowerShell execution policy
+
+Users do not need to change their permanent PowerShell execution policy. `Setup.cmd` launches the installer with `-ExecutionPolicy Bypass`, which applies only to that one PowerShell process and does not modify the machine or user configuration. This launch path is tested from a parent session set to `Restricted`, including from a UNC network path.
+
+Organization-enforced Group Policy (`MachinePolicy` or `UserPolicy`), AppLocker/WDAC, antivirus rules, or other application-control software can still prevent scripts from running; a local installer cannot bypass those controls. If Windows marks a downloaded ZIP as blocked, open its **Properties**, select **Unblock**, and extract it again before running `Setup.cmd`.
+
 The generated overlay is stored by default in:
 
 ```text
