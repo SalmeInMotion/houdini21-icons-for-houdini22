@@ -352,13 +352,28 @@ function Select-HoudiniFolder {
     $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
     $dialog.Description = $text.Choose -f $Major
     $dialog.ShowNewFolderButton = $false
-    if (Test-Path -LiteralPath $Combo.Text -PathType Container) {
-        $dialog.SelectedPath = $Combo.Text
+    $initialDirectory = Get-HoudiniBrowseInitialDirectory -Path ([string]$Combo.Text)
+    if ($null -ne $initialDirectory) {
+        $dialog.SelectedPath = $initialDirectory
     }
-    if ($dialog.ShowDialog($form) -eq [System.Windows.Forms.DialogResult]::OK) {
-        $Combo.Text = $dialog.SelectedPath
+    try {
+        if ($dialog.ShowDialog($form) -eq [System.Windows.Forms.DialogResult]::OK) {
+            $Combo.Text = $dialog.SelectedPath
+        }
     }
-    $dialog.Dispose()
+    finally {
+        $dialog.Dispose()
+    }
+}
+
+function Show-SetupUiError {
+    param([Parameter(Mandatory = $true)][System.Management.Automation.ErrorRecord]$ErrorRecord)
+
+    $message = $ErrorRecord.Exception.Message
+    $logBox.Text = $message
+    $mainStatus.Text = $text.Error
+    $mainStatus.ForeColor = [System.Drawing.Color]::FromArgb(170, 55, 55)
+    [void][System.Windows.Forms.MessageBox]::Show($form, $message, $text.Error, 'OK', 'Error')
 }
 
 function Set-Busy {
@@ -395,8 +410,14 @@ function Complete-Action {
     }
 }
 
-$h21Browse.Add_Click({ Select-HoudiniFolder -Combo $h21Combo -Major 21 })
-$h22Browse.Add_Click({ Select-HoudiniFolder -Combo $h22Combo -Major 22 })
+$h21Browse.Add_Click({
+    try { Select-HoudiniFolder -Combo $h21Combo -Major 21 }
+    catch { Show-SetupUiError -ErrorRecord $_ }
+})
+$h22Browse.Add_Click({
+    try { Select-HoudiniFolder -Combo $h22Combo -Major 22 }
+    catch { Show-SetupUiError -ErrorRecord $_ }
+})
 $h21Combo.Add_TextChanged({ [void](Update-PathStatus -Combo $h21Combo -StatusLabel $h21Status -Major 21) })
 $h22Combo.Add_TextChanged({ [void](Update-PathStatus -Combo $h22Combo -StatusLabel $h22Status -Major 22) })
 $closeButton.Add_Click({ $form.Close() })

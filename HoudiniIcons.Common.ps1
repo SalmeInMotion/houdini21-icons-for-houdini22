@@ -40,6 +40,26 @@ function Resolve-HoudiniInstallRoot {
     return (Get-NormalizedFullPath -Path $resolved)
 }
 
+function Get-HoudiniBrowseInitialDirectory {
+    param([AllowEmptyString()][string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return $null
+    }
+
+    try {
+        $resolved = Resolve-HoudiniInstallRoot -Path $Path
+        if (Test-Path -LiteralPath $resolved -PathType Container) {
+            return $resolved
+        }
+    }
+    catch {
+        # An invalid manually typed path should not prevent Browse from opening.
+    }
+
+    return $null
+}
+
 function Get-HoudiniExecutableVersion {
     param([Parameter(Mandatory = $true)][string]$InstallRoot)
 
