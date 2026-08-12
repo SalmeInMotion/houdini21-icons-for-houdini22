@@ -1,0 +1,8 @@
+.test/
+.tmp-*/
+*.staging.*
+*.backup.*
+manifest.json
+SVGIcons*.index
+SVGIcons*.cache
+SVGIcons*.cache.serial
